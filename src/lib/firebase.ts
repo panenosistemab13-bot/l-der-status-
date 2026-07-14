@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBttCLG-igllk6fS11O-J6HNo6GzdGqKT0",
+  apiKey: "AIzaSyBttCLG-igllk6fS110-J6HNo6GZdGqKT0",
   authDomain: "status-lider.firebaseapp.com",
   databaseURL: "https://status-lider-default-rtdb.firebaseio.com",
   projectId: "status-lider",
