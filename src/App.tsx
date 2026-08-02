@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ClipboardPaste, RefreshCw, AlertCircle, CheckCircle2, ChevronDown, Plus, Trash2, Download } from 'lucide-react';
+import { db, auth } from './lib/firebase';
 import { ref, onValue, set, update } from 'firebase/database';
-import { db } from './lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 
 // --- TSV Parser Helper ---
 // Safely parses TSV data that might have been copied from Excel with intra-cell newlines (wrapped in quotes)
@@ -162,58 +163,65 @@ export default function App() {
 
   // Sync from Firebase
   useEffect(() => {
-    const dbRef = ref(db, 'historico/statusLider');
-    const unsub = onValue(dbRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        isIncomingSync.current = true;
-        
-        const updatesToSave: any = {};
-        if (data.operators) {
-          setOperators(data.operators);
-          updatesToSave.operators = data.operators;
+    let unsub: any = null;
+    signInAnonymously(auth).then(() => {
+      const dbRef = ref(db, 'historico/statusLider');
+      console.log("Firebase: Setting up listener on:", 'historico/statusLider');
+      unsub = onValue(dbRef, (snapshot) => {
+        console.log("Firebase: Listener received update. Exists:", snapshot.exists());
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          console.log("Firebase: Data received:", data);
+          isIncomingSync.current = true;
+          
+          const updatesToSave: any = {};
+          if (data.operators) {
+            setOperators(data.operators);
+            updatesToSave.operators = data.operators;
+          }
+          if (data.selectedOperator) {
+            setSelectedOperator(data.selectedOperator);
+            updatesToSave.selectedOperator = data.selectedOperator;
+          }
+          if (data.stats) {
+            setStats(data.stats);
+            updatesToSave.stats = data.stats;
+          }
+          if (data.descarga) {
+            setDescarga(data.descarga);
+            updatesToSave.descarga = data.descarga;
+          }
+          if (data.armazenagem) {
+            setArmazenagem(data.armazenagem);
+            updatesToSave.armazenagem = data.armazenagem;
+          }
+          if (data.paletes) {
+            setPaletes(data.paletes);
+            updatesToSave.paletes = data.paletes;
+          }
+          if (data.organizacao) {
+            setOrganizacao(data.organizacao);
+            updatesToSave.organizacao = data.organizacao;
+          }
+          saveLocal(updatesToSave);
+          setTimeout(() => { isIncomingSync.current = false; }, 100);
+        } else {
+          console.log("Firebase: No data exists at path, initializing.");
+          // Se não existir, inicializa o documento no Firebase com o estado atual
+          set(dbRef, {
+              operators, selectedOperator, stats, descarga, armazenagem, paletes, organizacao
+          }).catch((err) => {
+            console.warn("Firebase Init Warning (expected if rules not public):", err);
+          });
         }
-        if (data.selectedOperator) {
-          setSelectedOperator(data.selectedOperator);
-          updatesToSave.selectedOperator = data.selectedOperator;
-        }
-        if (data.stats) {
-          setStats(data.stats);
-          updatesToSave.stats = data.stats;
-        }
-        if (data.descarga) {
-          setDescarga(data.descarga);
-          updatesToSave.descarga = data.descarga;
-        }
-        if (data.armazenagem) {
-          setArmazenagem(data.armazenagem);
-          updatesToSave.armazenagem = data.armazenagem;
-        }
-        if (data.paletes) {
-          setPaletes(data.paletes);
-          updatesToSave.paletes = data.paletes;
-        }
-        if (data.organizacao) {
-          setOrganizacao(data.organizacao);
-          updatesToSave.organizacao = data.organizacao;
-        }
-        saveLocal(updatesToSave);
-        setTimeout(() => { isIncomingSync.current = false; }, 100);
-      } else {
-        // Se não existir, inicializa o documento no Firebase com o estado atual
-        set(dbRef, {
-            operators, selectedOperator, stats, descarga, armazenagem, paletes, organizacao
-        }).catch((err) => {
-          console.warn("Firebase Init Warning (expected if rules not public):", err);
-        });
-      }
-    }, (err) => {
-      console.warn("Firebase Sync Permission Warning: ", err);
-      setTimeout(() => {
-         setStatusMessage({ text: 'Modo Local Ativo: Permissão do Firebase indisponível. Dados salvos localmente.', type: 'warning' });
-      }, 0);
+      }, (err) => {
+        console.error("Firebase Sync Full Error Detail: ", JSON.stringify(err, Object.getOwnPropertyNames(err)));
+        setStatusMessage({ text: 'Acesso Negado ao Firebase. Verifique as Regras no Console.', type: 'error' });
+      });
+    }).catch((err) => {
+        console.error("Auth error:", err);
     });
-    return () => unsub();
+    return () => { if (unsub) unsub(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
