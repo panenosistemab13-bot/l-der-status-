@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase } from 'firebase/database';
-import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBttCLG-igllk6fS110-J6HNo6GZdGqKT0",
@@ -15,4 +15,4 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app, "https://status-lider-default-rtdb.firebaseio.com");
-export const auth = getAuth(app);
+export const firestore = getFirestore(app);

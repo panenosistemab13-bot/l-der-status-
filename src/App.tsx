@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ClipboardPaste, RefreshCw, AlertCircle, CheckCircle2, ChevronDown, Plus, Trash2, Download } from 'lucide-react';
-import { db, auth } from './lib/firebase';
+import { db, firestore } from './lib/firebase';
 import { ref, onValue, set, update, get } from 'firebase/database';
-import { signInAnonymously } from 'firebase/auth';
+import { collection, addDoc, writeBatch, doc } from 'firebase/firestore';
 
 // --- TSV Parser Helper ---
 // Safely parses TSV data that might have been copied from Excel with intra-cell newlines (wrapped in quotes)
@@ -163,14 +163,13 @@ export default function App() {
 
   // Sync from Firebase
   useEffect(() => {
-    let unsub: any = null;
-    signInAnonymously(auth).then(() => {
       const dbRef = ref(db, 'historico/statusLider');
       
       // Perform initial fetch
       get(dbRef).then((snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
+          console.log("Firebase: Initial fetch full data:", JSON.stringify(data, null, 2));
           isIncomingSync.current = true;
           
           if (data.operators) setOperators(data.operators);
@@ -182,13 +181,16 @@ export default function App() {
           if (data.organizacao) setOrganizacao(data.organizacao);
           
           setTimeout(() => { isIncomingSync.current = false; }, 100);
+        } else {
+          console.log("Firebase: No data exists at initial fetch.");
         }
       }).catch(console.error);
 
       // Listen for updates
-      unsub = onValue(dbRef, (snapshot) => {
+      const unsub = onValue(dbRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
+          console.log("Firebase: Listener update full data:", JSON.stringify(data, null, 2));
           isIncomingSync.current = true;
           
           if (data.operators) setOperators(data.operators);
@@ -204,10 +206,7 @@ export default function App() {
       }, (err) => {
         console.error("Firebase Sync Error: ", err);
       });
-    }).catch((err) => {
-        console.error("Auth error:", err);
-    });
-    return () => { if (unsub) unsub(); };
+      return () => { if (unsub) unsub(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -233,6 +232,78 @@ export default function App() {
     }, 500);
   };
 
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+
+  // --- AI Extraction Functions ---
+  // --- Local Data Extraction Functions ---
+  function processarTextoSemIA(textoPlanilha: string) {
+    const linhas = textoPlanilha.trim().split(/\r?\n/);
+    if (linhas.length < 2) return [];
+
+    // Pega os cabeçalhos da 1ª linha
+    const cabecalhos = linhas[0].split('\t').map(c => c.trim());
+
+    // Converte TODAS as linhas em objetos JSON
+    return linhas.slice(1).map(linha => {
+      const valores = linha.split('\t');
+      const objeto: any = {};
+
+      cabecalhos.forEach((cabecalho, index) => {
+        objeto[cabecalho] = valores[index] ? valores[index].trim() : "";
+      });
+
+      return objeto;
+    });
+  }
+
+  async function salvarNoFirebaseEmLotes(listaDeDados: any[], nomeColecao = "minhas_informacoes") {
+    const LIMITE_LOTE = 500;
+    for (let i = 0; i < listaDeDados.length; i += LIMITE_LOTE) {
+      const loteAtual = listaDeDados.slice(i, i + LIMITE_LOTE);
+      const batch = writeBatch(firestore);
+
+      loteAtual.forEach((item) => {
+        const novoDocRef = doc(collection(firestore, nomeColecao));
+        batch.set(novoDocRef, item);
+      });
+
+      await batch.commit();
+      console.log(`Progresso: ${Math.min(i + LIMITE_LOTE, listaDeDados.length)} / ${listaDeDados.length} salvos.`);
+    }
+  }
+
+  const importarPlanilhaCompleta = async () => {
+    if (!pastedData.trim()) {
+      setStatusMessage({ text: 'Por favor, cole os dados da planilha antes de continuar.', type: 'error' });
+      return;
+    }
+
+    setIsProcessingAI(true);
+    setStatusMessage({ text: 'Extraindo dados...', type: '' });
+
+    try {
+      const dadosExtraidos = processarTextoSemIA(pastedData);
+      
+      if (dadosExtraidos.length === 0) {
+        throw new Error("Nenhum dado encontrado ou cabeçalhos inválidos.");
+      }
+
+      setStatusMessage({ text: `Extraídos ${dadosExtraidos.length} registros. Salvando no Firestore...`, type: '' });
+      
+      await salvarNoFirebaseEmLotes(dadosExtraidos, "minhas_informacoes");
+      
+      setStatusMessage({ text: `Sucesso! Foram salvos ${dadosExtraidos.length} itens no Firestore.`, type: 'success' });
+      // Clear after success
+      setPastedData('');
+    } catch (error: any) {
+      console.error("Erro no processo de importação:", error);
+      setStatusMessage({ text: `Falha: ${error.message || 'Erro desconhecido'}`, type: 'error' });
+    } finally {
+      setIsProcessingAI(false);
+    }
+  };
+
+  // --- Local Processing ---
   const processData = () => {
     if (!pastedData.trim()) {
       setStatusMessage({ text: 'Cole os dados da planilha primeiro.', type: 'error' });
@@ -373,13 +444,23 @@ export default function App() {
               />
             </div>
             <div className="sm:w-48 flex flex-col gap-2 justify-end">
-              <button
-                onClick={processData}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded shadow-sm text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                PROCESSAR DADOS
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={processData}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded shadow-sm text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  PROCESSAR DADOS
+                </button>
+                <button
+                  onClick={importarPlanilhaCompleta}
+                  disabled={isProcessingAI}
+                  className={`w-full ${isProcessingAI ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-bold py-2 rounded shadow-sm text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isProcessingAI ? 'animate-spin' : ''}`} />
+                  IMPORTAR TUDO (FIRESTORE)
+                </button>
+              </div>
               {statusMessage.text && (
                 <div className={`w-full flex items-center justify-center gap-1.5 text-xs font-bold px-2 py-1.5 border rounded ${statusMessage.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
                   {statusMessage.type === 'error' ? <AlertCircle className="w-3.5 h-3.5 shrink-0" /> : <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
