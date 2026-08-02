@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ClipboardPaste, RefreshCw, AlertCircle, CheckCircle2, ChevronDown, Plus, Trash2, Download } from 'lucide-react';
 import { db, auth } from './lib/firebase';
-import { ref, onValue, set, update } from 'firebase/database';
+import { ref, onValue, set, update, get } from 'firebase/database';
 import { signInAnonymously } from 'firebase/auth';
 
 // --- TSV Parser Helper ---
@@ -166,57 +166,43 @@ export default function App() {
     let unsub: any = null;
     signInAnonymously(auth).then(() => {
       const dbRef = ref(db, 'historico/statusLider');
-      console.log("Firebase: Setting up listener on:", 'historico/statusLider');
-      unsub = onValue(dbRef, (snapshot) => {
-        console.log("Firebase: Listener received update. Exists:", snapshot.exists());
+      
+      // Perform initial fetch
+      get(dbRef).then((snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
-          console.log("Firebase: Data received:", data);
           isIncomingSync.current = true;
           
-          const updatesToSave: any = {};
-          if (data.operators) {
-            setOperators(data.operators);
-            updatesToSave.operators = data.operators;
-          }
-          if (data.selectedOperator) {
-            setSelectedOperator(data.selectedOperator);
-            updatesToSave.selectedOperator = data.selectedOperator;
-          }
-          if (data.stats) {
-            setStats(data.stats);
-            updatesToSave.stats = data.stats;
-          }
-          if (data.descarga) {
-            setDescarga(data.descarga);
-            updatesToSave.descarga = data.descarga;
-          }
-          if (data.armazenagem) {
-            setArmazenagem(data.armazenagem);
-            updatesToSave.armazenagem = data.armazenagem;
-          }
-          if (data.paletes) {
-            setPaletes(data.paletes);
-            updatesToSave.paletes = data.paletes;
-          }
-          if (data.organizacao) {
-            setOrganizacao(data.organizacao);
-            updatesToSave.organizacao = data.organizacao;
-          }
-          saveLocal(updatesToSave);
+          if (data.operators) setOperators(data.operators);
+          if (data.selectedOperator) setSelectedOperator(data.selectedOperator);
+          if (data.stats) setStats(data.stats);
+          if (data.descarga) setDescarga(data.descarga);
+          if (data.armazenagem) setArmazenagem(data.armazenagem);
+          if (data.paletes) setPaletes(data.paletes);
+          if (data.organizacao) setOrganizacao(data.organizacao);
+          
           setTimeout(() => { isIncomingSync.current = false; }, 100);
-        } else {
-          console.log("Firebase: No data exists at path, initializing.");
-          // Se não existir, inicializa o documento no Firebase com o estado atual
-          set(dbRef, {
-              operators, selectedOperator, stats, descarga, armazenagem, paletes, organizacao
-          }).catch((err) => {
-            console.warn("Firebase Init Warning (expected if rules not public):", err);
-          });
+        }
+      }).catch(console.error);
+
+      // Listen for updates
+      unsub = onValue(dbRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          isIncomingSync.current = true;
+          
+          if (data.operators) setOperators(data.operators);
+          if (data.selectedOperator) setSelectedOperator(data.selectedOperator);
+          if (data.stats) setStats(data.stats);
+          if (data.descarga) setDescarga(data.descarga);
+          if (data.armazenagem) setArmazenagem(data.armazenagem);
+          if (data.paletes) setPaletes(data.paletes);
+          if (data.organizacao) setOrganizacao(data.organizacao);
+          
+          setTimeout(() => { isIncomingSync.current = false; }, 100);
         }
       }, (err) => {
-        console.error("Firebase Sync Full Error Detail: ", JSON.stringify(err, Object.getOwnPropertyNames(err)));
-        setStatusMessage({ text: 'Acesso Negado ao Firebase. Verifique as Regras no Console.', type: 'error' });
+        console.error("Firebase Sync Error: ", err);
       });
     }).catch((err) => {
         console.error("Auth error:", err);
@@ -254,6 +240,7 @@ export default function App() {
     }
 
     const rows = parseTSV(pastedData);
+    console.log("processData rows:", rows);
     if (rows.length === 0) {
       setStatusMessage({ text: 'Dados insuficientes.', type: 'error' });
       return;
@@ -261,11 +248,13 @@ export default function App() {
 
     // Normalize headers for flexible matching
     const headers = rows[0].map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    console.log("processData headers:", headers);
     
     // Find column indices
     let destIdx = headers.findIndex(h => h.includes('destino'));
     let docaIdx = headers.findIndex(h => h === 'doca' || h === 'do ca');
     let libIdx = headers.findIndex(h => h.includes('libdoc') || h === 'libdoca' || h.includes('libera'));
+    console.log(`Indices: dest=${destIdx}, doca=${docaIdx}, lib=${libIdx}`);
 
     let startRow = 1;
 
